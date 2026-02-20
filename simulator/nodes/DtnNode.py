@@ -14,6 +14,11 @@ class DtnNode(Simulable):
     
     def __init__(self, env, nid, props):
         super().__init__(env)
+        
+        #Initialize the counter
+        self.arrivals_count = 0
+        self.arrivals_bytes_count = 0
+        
         # Initialize node properties
         self.nid   = nid
         self.type  = env.config['network'].nodes[nid].type
@@ -283,6 +288,12 @@ class DtnNode(Simulable):
 
         # Add this node in the list of visited nodes (NOTE: must be done before ``find_routes``)
         if first_time: bundle.visited.append(self.nid)
+        
+        if first_time:
+            #print(bundle)
+            self.arrivals_count += 1
+            self.arrivals_bytes_count += bundle.data_vol
+
 
         # Reset the list of excluded contacts
         if first_time: bundle.excluded = []

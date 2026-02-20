@@ -46,6 +46,7 @@ def run_simulation(config=None, profile=False, return_env=False):
         raise ValueError("Parallel and profile cannot be both True")
 
     # If the configuration is provided, run the simulation
+       
     if not config:
         # Otherwise, you need to use argument parser
         args = process_arguments()
@@ -67,13 +68,53 @@ def _run_simulation(config, profile, return_env):
 
     # Initialize environment, create nodes/connections, start generators
     env.initialize()
+    
+
+    # ================= RL attach from YAML =================
+    if 'rli' in env.config:
+
+        rli_parser = env.config['rli']      
+        rli_conf = rli_parser.params['rli'] 
+        
+        clazz = rli_conf.get('class',None)
+        node_list = rli_conf.get('nodes', None)
+        delta_t = rli_conf.get('delta_t', 10)
+        control_dt = rli_conf.get('control_dt',10)
+        outfile = rli_conf.get('outfile', 'rl_states')
+        view_onscreen = rli_conf.get('view_onscreen',True)
+        
+        if clazz == 'RLInterface':
+            if node_list is None:
+                print("[RL] Error: node_list is None. Expected a list like", list(env.nodes.keys()))
+  
+            else:
+                if set(node_list).issubset(set(list(env.nodes.keys()))):
+                    from simulator.rl.RLInterface import RLInterface
+                    env.rl_interface = RLInterface(env, node_list, delta_t, control_dt, outfile, view_onscreen)
+                    print(f"[RL] [Completed] Attached to {node_list}. Sampling every {delta_t} seconds")
+                else:
+                    print("[RL] Error: Some of the nodes defined are invalid. Checl valid nodes:", list(env.nodes.keys()))
+        else:
+            print("[RL] Error: Invalid Class. Available interfaces: [RLInterface]")
+    else:
+        print("[RL] Error: No RL section in YAML")
+
+    # ===================RL attach from YAML =================
 
     # Run simulation
     if profile:
         profileit(env.run)
     else:
         env.run()
-
+    
+    #=========================================================
+    
+    if hasattr(env, 'rl_interface'):
+        print("[RL] Finalizing RL logging...")
+        env.rl_interface.finalize()
+        
+    #===========================================================
+    
     # Validate simulation
     ok = env.validate_simulation()
 

@@ -1,0 +1,158 @@
+# =============================================================================
+# Earth–Relay–Mars Deep Space DTN (CGR + Scheduled Contacts)
+# =============================================================================
+
+globals:
+  indir:    ./tests/inputs/
+  outdir:   ./tests/results/
+  outfile:  earth_relay_mars_v3.h5
+  logfile:  earth_mars.log
+  log:      False
+  track:    True
+
+# =============================================================================
+# SCENARIO
+# =============================================================================
+
+scenario:
+  epoch: 01-JAN-2026 00:00:00
+  seed: 42
+  until: 3605
+
+# =============================================================================
+# MOBILITY (CONTACT PLAN)
+# =============================================================================
+
+scheduled_model:
+  class: DtnScheduledMobilityModel
+  contacts: ./contact_table.xlsx
+  ranges:   ./range_intervals.xlsx
+  epoch: 01-JAN-2026 00:00:00
+
+# =============================================================================
+# NETWORK
+# =============================================================================
+
+network:
+  nodes:
+    EARTH: {type: earth_node}
+    RELAY: {type: relay_node}
+    MARS:  {type: mars_node}
+
+  connections:
+    C1: {origin: EARTH, destination: RELAY, type: earth_relay_conn}
+    C2: {origin: RELAY, destination: MARS,  type: relay_mars_conn}
+
+# =============================================================================
+# ROUTER (CGR)
+# =============================================================================
+
+cgr_router:
+  class: DtnCgrBasicRouter
+  relays: all
+
+band_selector:
+  class: DtnDefaultSelector
+
+# =============================================================================
+# NODES
+# =============================================================================
+
+earth_node:
+  class: DtnNode
+  router: cgr_router
+  generators: [earth_generator]
+  selector: band_selector
+  radios: [x_radio_earth_relay]
+  mobility_model: scheduled_model
+
+relay_node:
+  class: DtnNode
+  router: cgr_router
+  generators: []
+  selector: band_selector
+  radios: [x_radio_earth_relay, x_radio_relay_mars]
+  mobility_model: scheduled_model
+
+mars_node:
+  class: DtnNode
+  router: cgr_router
+  generators: []
+  selector: band_selector
+  radios: [x_radio_relay_mars]
+  mobility_model: scheduled_model
+
+# =============================================================================
+# CONNECTIONS (Scheduled)
+# =============================================================================
+
+earth_relay_conn:
+  class: DtnScheduledConnection
+  ducts: {X: x_duct_earth_relay}
+  mobility_model: scheduled_model
+
+relay_mars_conn:
+  class: DtnScheduledConnection
+  ducts: {X: x_duct_relay_mars}
+  mobility_model: scheduled_model
+
+# =============================================================================
+# DUCTS & RADIO
+# =============================================================================
+
+x_duct_earth_relay:
+  class: [DtnInductBasic, DtnOutductBasic]
+  radio: x_radio_earth_relay
+
+x_duct_relay_mars:
+  class: [DtnInductBasic, DtnOutductBasic]
+  radio: x_radio_relay_mars
+
+x_radio_earth_relay:
+  class: DtnBasicRadio
+  rate: !!float 5e6
+  BER: !!float 0.0
+
+x_radio_relay_mars:
+  class: DtnBasicRadio
+  rate: !!float 4e6
+  BER: !!float 0.0
+
+# =============================================================================
+# TRAFFIC (Earth → Mars)
+# =============================================================================
+earth_generator:
+  class: DtnBernoulliUniformGenerator
+  data_type:   science
+  bundle_size: !!float 50e3
+  bundle_TTL:  7200
+  critical:    False
+  destination: MARS
+  p: 0.6
+  min_bundles: 0
+  max_bundles: 50
+  tstart: 0
+  tend: 1800
+# =============================================================================
+# RL INTERFACE
+# =============================================================================
+
+rli:
+  class: RLInterface
+  nodes: [EARTH, RELAY, MARS]
+  delta_t: 5
+  control_dt: 5
+  outfile: rl_states
+  view_onscreen: 1
+
+# =============================================================================
+# REPORT
+# =============================================================================
+
+reports:
+  - DtnArrivedBundlesReport
+  - DtnNodeInQueueBundlesReport
+  - DtnDroppedBundlesReport
+  - DtnInOutductBundlesReport
+  - DtnInLimboBundlesReport
+
