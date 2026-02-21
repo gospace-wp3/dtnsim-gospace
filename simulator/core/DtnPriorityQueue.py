@@ -85,6 +85,11 @@ class DtnPriorityQueue(Simulable):
         # Wait until there is at least one element in the queue. Only do it if the queue is
         # empty. This allows the calling function to either ``data = yield from queue.get()``
         # or to (1) ``yield queue.is_empty(); data = yield from queue.get()``
+        if self.owner.parent.parent.nid == 'RELAY':
+            where = 'left'   # lifo
+        else:
+            where = 'left'    # lifo
+            
         if check_empty: yield self.is_empty()
 
         # Iterate over the queues in priority order. Recall that self.priorities
