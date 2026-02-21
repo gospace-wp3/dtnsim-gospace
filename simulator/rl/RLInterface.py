@@ -1,7 +1,8 @@
 import os
 import csv
 from simulator.core.DtnCore import Simulable
-
+from simulator.rl.RLAgent import RLAgent
+from collections import deque
 
 class RLInterface(Simulable):
 
@@ -15,8 +16,16 @@ class RLInterface(Simulable):
         self.prev_arrivals = {nid: 0 for nid in self.nodes}
         self.prev_arrival_bytes = {nid: 0 for nid in self.nodes}
         self.prev_departures = {}
+        self.prev_energy = {nid: 0 for nid in self.nodes}
         self.control_dt = control_dt
         self.last_control_time = 0
+        self.drop_applied = False
+        
+        # Initializing for RL Agent
+        self.agent = RLAgent()
+        self.prev_state = None
+        self.prev_action = None
+        self.accum_reward = 0
 
 
         outdir = env.config['globals'].outdir
@@ -31,7 +40,7 @@ class RLInterface(Simulable):
 
             with open(file_path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["time", "queue_size_earth", "queue_size_relay", "queue_size_mars","radio_in_queue", "node_in_queue", "node_limbo_queue","node_total_induct", "node_total_outduct", "earth_conn", "relay_conn", "mars_conn","departure", "departure_rate","departure_in_bytes","departure_rate_in_Bps","arrivals","arrival_rate","arrival_in_bytes","arrival_rate_in_Bps"])
+                writer.writerow(["time", "queue_size_earth", "queue_size_relay", "queue_size_mars","radio_in_queue", "node_in_queue", "node_limbo_queue","node_total_induct", "node_total_outduct", "earth_conn", "relay_conn", "mars_conn","departure", "departure_rate","departure_in_bytes","departure_rate_in_Bps","arrivals","arrival_rate","arrival_in_bytes","arrival_rate_in_Bps","cummulative energy","energy_spent","power","rl_reward","dropped"])
 
         print(f"[RL] Logging directory: {outdir}")
         print(f"[RL] Nodes attached: {list(self.nodes.keys())}")
@@ -67,8 +76,17 @@ class RLInterface(Simulable):
                 if q is None or not hasattr(q, 'stored'):
                     continue
 
-                size = len(q.stored)
+               # size = len(q.stored)
+                size = 0
+                pq = q.queue
+                
+                for priority, dq in pq.items.items():
+                    for rt_record in dq:
+                        bundle = rt_record.bundle
 
+                        if not bundle.dropped:
+                            size += 1
+                            
                 if neighbor == 'EARTH':
                     total_earth += size
                     
@@ -191,16 +209,75 @@ class RLInterface(Simulable):
         arr_rate_in_Bps = arrivals_in_bytes / self.delta_t
         
         return arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps
+
+    def get_energy(self, nid):
+        node = self.nodes[nid]
+        current_energy = 0
+        if hasattr(node, 'radios'):
+            for rid, radio in node.radios.items():
+                if hasattr(radio, 'energy'):
+                    current_energy += radio.energy
+                else:
+                    print("[RL] Error: radios has no attribute to energy")
+        else:
+            print("[RL] Error: node has no attribute to radios")
+            
+        prev = self.prev_energy.get(nid,0)
+        energy_change = current_energy - prev
+        energy_rate = energy_change/self.delta_t
+        self.prev_energy[nid] = current_energy
+        return current_energy, energy_change, energy_rate       
     
+    def get_bundle_info(self, node):
+
+        bundle_info = []
+
+        for neighbor, mgr in node.queues.items():
+
+            if mgr is None or neighbor == 'opportunistic':
+                continue
+
+            for priority, q in mgr.queue.items.items():
+
+                for rt_record in q:
+                    bundle = rt_record.bundle
+                    
+                    if not bundle.dropped:
+                        bundle_info.append({
+                            "bid": bundle.bid,
+                            "neighbor": neighbor,
+                            "dest": bundle.dest,
+                            "creation_time": bundle.creation_time,
+                            "priority": priority
+                        })
+
+        return bundle_info
+        
+    def apply_drop_by_bid(self, node, bids_to_drop):
+
+        bids_to_drop = set(bids_to_drop)
+        dropped = 0
+
+        for neighbor, mgr in node.queues.items():
+
+            if mgr is None or neighbor == 'opportunistic':
+                continue
+
+            for priority, q in mgr.queue.items.items():
+
+                for rt_record in list(q):
+                    bundle = rt_record.bundle
+                    
+                    if bundle.bid in bids_to_drop and not bundle.dropped:
+                    
+                        node.drop(bundle, "RL Drop")
+                        dropped += 1
+                  
+        print(f"[RL] Dropped {dropped} bundles")
+        return dropped 
 #============================================= RL AGENT ==========================================
 
-    def dummy_agent(self, nid, state):
-        radio_in_queue = state["radio_in_queue"]
 
-        if radio_in_queue > 1174:
-            return 1.5e6   # 5 Mbps
-        else:
-            return 2.5e6    # 2 Mbps
         
 #============================================= RL AGENT === APPLY ACTION ========================================
     
@@ -213,13 +290,12 @@ class RLInterface(Simulable):
     def run(self):
 
         while True:
-        
+            bundle_info = []
             t = self.env.now
-            
+            reward = 0
             if self.env.now == 0:
                 for nid, node in self.env.nodes.items():
                     print(nid, type(node.router))
-
 
             for nid, node in self.nodes.items():
                 total_earth, total_relay, total_mars, node_in_queue, node_limbo_queue, total_induct, total_outduct = self.get_queue_sizes(node)
@@ -228,20 +304,89 @@ class RLInterface(Simulable):
                 full_contact_state = self.complete_contact_state(nid, contacts)
                 departures, dep_rate, departures_in_bytes, dep_rate_in_bytes = self.get_departure_rate(nid)
                 arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps = self.get_arrival_rate(nid)
-                 
+                cum_energy, energy_change, energy_rate = self.get_energy(nid)
                 rate = 0 
                 radio_in_queue = 0
+                dropped = 0
                 
                 for rid, radio in node.radios.items():
                     radio_in_queue = len(radio.in_queue.items)  
-                     
+                 
                 if nid == "RELAY":
-                    state = {"radio_in_queue": radio_in_queue} 
+                
                     
+                    #============DUMMY DROP =====================
+
+               #    bundle_info.sort(key=lambda x: x["creation_time"])
+
+               #    bids = [b["bid"] for b in bundle_info[:500]]
+
+               #    self.apply_drop_by_bid(node, bids)
+
+               #    self.drop_applied = True
+                
+                   #============DUMMY DROP =====================
+                   
+                    contact_state = full_contact_state['MARS']
+
+                    state = {
+                        "radio_queue": total_mars,
+                        "departure_rate": dep_rate,
+                        "energy_spent": energy_change,
+                        "contact_state": contact_state
+                    }
+
+                    w_q = 0.02
+                    w_e = 1.0
+                    w_d = 0.1
+                    w_dp = 1.0
+                    
+                    reward = (
+                        - w_q * state["radio_queue"]
+                        - w_e * state["energy_spent"]
+                        + w_d * state["departure_rate"]
+                        - w_dp * dropped
+                    )
+
+                    self.accum_reward += reward / 10
+
+
+# Control interval
                     if self.env.now - self.last_control_time >= self.control_dt:
-                        action_rate = self.dummy_agent(nid, state) 
+
+    # Learn from previous action
+                        if self.prev_state is not None:
+                            self.agent.learn(
+                                self.prev_state,
+                                self.prev_action,
+                                self.accum_reward,
+                                state
+                            )
+
+                        print(f"[RL] reward over interval = {self.accum_reward}")
+
+    # --- New action ---
+                        action_rate, drop_k = self.agent.act(state)
+
+                        print(f"[RL] Action -> rate={action_rate/1e6} Mbps, drop={drop_k}")
+                        print(f"[RL] Actual Dropped: {dropped}")
+
+    # Apply rate
                         self.apply_rate(node, action_rate)
-                        self.last_control_time = self.env.now     
+
+    # Apply dropping
+                        if drop_k > 0:
+                            bundle_info = self.get_bundle_info(node)
+                            if bundle_info:
+                                bundle_info.sort(key=lambda x: x["creation_time"])
+                                bids_to_drop = [b["bid"] for b in bundle_info[:drop_k]]
+                                dropped = self.apply_drop_by_bid(node, bids_to_drop)
+
+    # Save for next step
+                        self.prev_state = state
+                        self.prev_action = (action_rate, drop_k)
+                        self.accum_reward = 0
+                        self.last_control_time = self.env.now
                                         
                 if self.view_onscreen:
                     print(f"[{t}] Node RLI Attached: {nid} -> E:{total_earth} R:{total_relay} M:{total_mars}")
@@ -249,11 +394,13 @@ class RLInterface(Simulable):
                     print(f"[{t}] Node Total Induct: {total_induct}, Node Total Outduct: {total_outduct}")
                     print(f"[{t}] Departures: {departures_in_bytes} Bytes and Departure Rate: {dep_rate_in_bytes} Bps")
                     print(f"[{t}] Arrivals: {arrivals_in_bytes} Bytes abd Arrival Rate: {arr_rate_in_Bps}")
+                    print(f"[{t}] Energy spent: {energy_change} J ; Power Measure: {energy_rate} W")
+                    print(f"[{t}] RELAY bundles in neighbor queues: {len(bundle_info)}")
                     print()
-                
+
                 with open(self.files[nid], "a", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow([t, total_earth, total_relay, total_mars, radio_in_queue, node_in_queue, node_limbo_queue, total_induct, total_outduct, full_contact_state['EARTH'], full_contact_state['RELAY'], full_contact_state['MARS'], departures, dep_rate, departures_in_bytes, dep_rate_in_bytes, arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps])
+                    writer.writerow([t, total_earth, total_relay, total_mars, radio_in_queue, node_in_queue, node_limbo_queue, total_induct, total_outduct, full_contact_state['EARTH'], full_contact_state['RELAY'], full_contact_state['MARS'], departures, dep_rate, departures_in_bytes, dep_rate_in_bytes, arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps, cum_energy, energy_change, energy_rate,reward,dropped])
 
             self.samples += 1
 
