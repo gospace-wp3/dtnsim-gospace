@@ -71,6 +71,7 @@ class DtnCgrNeighborManager(Simulable):
         # comes from CGR routing, this will be specified because you have
         # a contact plan. If this rt_record comes from static routing, the
         # cid is None, therefore, override it.
+        
         cid = rt_record.contact['cid']
         if cid is None: cid = self.current_cid
 
@@ -219,12 +220,20 @@ class DtnCgrNeighborManager(Simulable):
             if self.outduct_sem.is_red: yield self.outduct_sem.green
 
             # Wait until there is something in the queue
-            rt_record = yield from self.queue.get()
-            
+            rt_record = yield from self.queue.get()            
+            bundle = rt_record.bundle
+           
             # Log and monitor exit of bundle
             self.disp('{} departs from the manager', rt_record.bundle)
             
             # Send this bundle towards the convergence layer
+            if bundle.dropped:
+            
+                if self.queue.capacity is not None:
+                    self.queue.capacity += bundle.data_vol
+                       
+                continue
+                 
             self.send(rt_record)
 
             # Do throttling mechanism, i.e you cannot send for a while. This "matches" the exit of bundles
