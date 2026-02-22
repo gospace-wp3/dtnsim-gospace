@@ -8,7 +8,7 @@ class RLAgent:
         self.rates = [1e6, 2e6, 5e6]
 
         # Drop actions (number of bundles)
-        self.drop_levels = [0, 1, 2, 3, 4, 5, 10]
+        self.drop_levels = [0,1,2,3,5]
 
         # Combined actions
         self.actions = []
@@ -23,10 +23,30 @@ class RLAgent:
         self.gamma = 0.9
 
     def discretize(self, state):
-        radio_bin = min(int(state["radio_queue"] // 100), 20)
+        
         dep_bin = min(int(state["departure_rate"] // 1e6), 5)
         energy_bin = min(int(state["energy_spent"] // 0.5), 10)
-        return (radio_bin, dep_bin, energy_bin)
+        pressure = state["pressure"]
+        if pressure < 0.05:
+            pressure_bin = 0
+        elif pressure < 0.15:
+            pressure_bin = 1
+        elif pressure < 0.30:
+            pressure_bin = 2
+        else:
+            pressure_bin = 3
+    
+    # Drops (0–3)
+        d = state["dropped"]
+        if d == 0:
+            drop_bin = 0
+        elif d <= 5:
+            drop_bin = 1
+        elif d <= 20:
+            drop_bin = 2
+        else:
+            drop_bin = 3
+        return (energy_bin, dep_bin, pressure_bin,drop_bin)
 
     def act(self, state):
         s = self.discretize(state)

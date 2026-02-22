@@ -40,7 +40,7 @@ class RLInterface(Simulable):
 
             with open(file_path, "w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow(["time", "queue_size_earth", "queue_size_relay", "queue_size_mars","radio_in_queue", "node_in_queue", "node_limbo_queue","node_total_induct", "node_total_outduct", "earth_conn", "relay_conn", "mars_conn","departure", "departure_rate","departure_in_bytes","departure_rate_in_Bps","arrivals","arrival_rate","arrival_in_bytes","arrival_rate_in_Bps","cummulative energy","energy_spent","power","rl_reward","dropped"])
+                writer.writerow(["time", "queue_size_earth", "queue_size_relay", "queue_size_mars","radio_in_queue", "node_in_queue", "node_limbo_queue","node_total_induct", "node_total_outduct", "earth_conn", "relay_conn", "mars_conn","departure", "departure_rate","departure_in_bytes","departure_rate_in_Bps","arrivals","arrival_rate","arrival_in_bytes","arrival_rate_in_Bps","cummulative energy","energy_spent","power","rl_reward","dropped","max_buffer","used_buffer","available_buffer"])
 
         print(f"[RL] Logging directory: {outdir}")
         print(f"[RL] Nodes attached: {list(self.nodes.keys())}")
@@ -275,6 +275,22 @@ class RLInterface(Simulable):
                   
         print(f"[RL] Dropped {dropped} bundles")
         return dropped 
+        
+    def get_buffer_info(self, node):
+    
+        buffer_info = {}
+
+        for neighbor, mgr in node.queues.items():
+            if mgr is None or neighbor == 'opportunistic':
+                continue
+
+            buffer_info[neighbor] = {
+                "max_buffer": mgr.queue.max_buffer,
+                "used_buffer": mgr.queue.backlog,
+                "available_buffer": mgr.queue.max_buffer - mgr.queue.backlog
+            }
+            
+        return buffer_info
 #============================================= RL AGENT ==========================================
 
 
@@ -293,11 +309,9 @@ class RLInterface(Simulable):
             bundle_info = []
             t = self.env.now
             reward = 0
-            if self.env.now == 0:
-                for nid, node in self.env.nodes.items():
-                    print(nid, type(node.router))
 
             for nid, node in self.nodes.items():
+                
                 total_earth, total_relay, total_mars, node_in_queue, node_limbo_queue, total_induct, total_outduct = self.get_queue_sizes(node)
                 
                 contacts = self.get_contact_states(nid)
@@ -309,12 +323,21 @@ class RLInterface(Simulable):
                 radio_in_queue = 0
                 dropped = 0
                 
+                buffer_state = self.get_buffer_info(node)
+                buffer_state_earth = buffer_state.get('EARTH',{})
+                buffer_state_relay = buffer_state.get('RELAY',{})
+                buffer_state_mars =  buffer_state.get('MARS',{})
+                
+                max_buffer   = buffer_state_mars.get("max_buffer", 0)
+                used_buffer  = buffer_state_mars.get("used_buffer", 0)
+                available_buffer  = buffer_state_mars.get("available_buffer", 0)
+                
                 for rid, radio in node.radios.items():
                     radio_in_queue = len(radio.in_queue.items)  
                  
                 if nid == "RELAY":
                 
-                    
+
                     #============DUMMY DROP =====================
 
                #    bundle_info.sort(key=lambda x: x["creation_time"])
@@ -328,24 +351,27 @@ class RLInterface(Simulable):
                    #============DUMMY DROP =====================
                    
                     contact_state = full_contact_state['MARS']
-
+                    buffer_util = used_buffer / max_buffer
+                    pressure = buffer_util - 0.5
+                    
                     state = {
-                        "radio_queue": total_mars,
                         "departure_rate": dep_rate,
                         "energy_spent": energy_change,
-                        "contact_state": contact_state
+                        "pressure": pressure,
+                        "dropped": dropped
                     }
 
-                    w_q = 0.02
                     w_e = 1.0
                     w_d = 0.1
-                    w_dp = 1.0
+                    w_dp = 1
+                    w_p = 1
                     
                     reward = (
-                        - w_q * state["radio_queue"]
+                    
                         - w_e * state["energy_spent"]
                         + w_d * state["departure_rate"]
-                        - w_dp * dropped
+                        - w_p * state["pressure"]
+                        - w_dp * dropped * (1 - state["pressure"])
                     )
 
                     self.accum_reward += reward / 10
@@ -400,7 +426,7 @@ class RLInterface(Simulable):
 
                 with open(self.files[nid], "a", newline="") as f:
                     writer = csv.writer(f)
-                    writer.writerow([t, total_earth, total_relay, total_mars, radio_in_queue, node_in_queue, node_limbo_queue, total_induct, total_outduct, full_contact_state['EARTH'], full_contact_state['RELAY'], full_contact_state['MARS'], departures, dep_rate, departures_in_bytes, dep_rate_in_bytes, arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps, cum_energy, energy_change, energy_rate,reward,dropped])
+                    writer.writerow([t, total_earth, total_relay, total_mars, radio_in_queue, node_in_queue, node_limbo_queue, total_induct, total_outduct, full_contact_state['EARTH'], full_contact_state['RELAY'], full_contact_state['MARS'], departures, dep_rate, departures_in_bytes, dep_rate_in_bytes, arrivals, arr_rate, arrivals_in_bytes, arr_rate_in_Bps, cum_energy, energy_change, energy_rate,reward,dropped,max_buffer,used_buffer,available_buffer])
 
             self.samples += 1
 
