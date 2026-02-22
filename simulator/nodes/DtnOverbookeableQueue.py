@@ -14,7 +14,8 @@ class DtnLockeablePriorityQueue(Simulable):
 
         # Create a priority queue for this manager
         self.queue = DtnPriorityQueue(env)
-
+        self.queue.owner = self
+        
         # Create the critical and bulk priority levels
         self.queue.new_priority_level(critical_priority)    # Critical
         self.queue.new_priority_level(bulk_priority)  # Bulk
@@ -99,6 +100,7 @@ class DtnOverbookeableQueue(DtnLockeablePriorityQueue):
 
         # Time of next closing
         self.next_close = None
+        self.max_buffer = 50e6
 
     @property
     def capacity(self):
@@ -116,8 +118,11 @@ class DtnOverbookeableQueue(DtnLockeablePriorityQueue):
 
     def put(self, rt_record, priority, where='left'):
         # Initialize variables
-        bundle = rt_record.bundle
-
+        bundle = rt_record.bundle        
+        
+        if self.backlog + bundle.data_vol > self.max_buffer:
+            return (rt_record,)
+                
         # If there is enough capacity left in this contact, just add the bundle to the queue
         if self.capacity > bundle.data_vol:
             yield from self.put_in_queue(rt_record, priority, where=where)
