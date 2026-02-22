@@ -80,7 +80,7 @@ class DtnQueue(Simulable):
 
         return pd.DataFrame.from_dict(d, orient='index')
         
-    def put(self, item, where='left'):
+    def put(self, item, where='left'): 
         # Count the new addition. If there is not enough capacity, this will block
         yield self.stop.put(1)
         
