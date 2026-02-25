@@ -5,5 +5,4 @@ This directory contains the Reinforcement Learning (RL) interface and agent impl
 This module currently includes:
 
     1. RLInterface.py – Interface between DTNSim and the RL agent
-    
     2. RLAgent.py – RL agent logic and decision policy
