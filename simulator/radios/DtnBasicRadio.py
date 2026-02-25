@@ -9,7 +9,11 @@ class DtnBasicRadio(DtnAbstractRadio):
 
         # Create input queue
         self.in_queue = DtnQueue(env)
-
+        self.max_buffer = 50e6
+        self.backlog = 0
+        self.departure_count = 0
+        self.departure_bytes_count = 0
+        
     @property
     def stored(self):
         df = self.in_queue.stored
@@ -26,20 +30,25 @@ class DtnBasicRadio(DtnAbstractRadio):
         super(DtnBasicRadio, self).initialize()
 
     def do_put(self, neighbor, message, peer, direction):
+        
+        size = message.num_bits
+            
         # Create item to send
         item = (neighbor, message, peer, direction)
 
         # Add it to the queue
         yield from self.in_queue.put(item)
+        self.backlog += size
 
     def run(self, **kwargs):
         while self.is_alive:
             # Get the next segment to transmit
             item = yield from self.in_queue.get()
-
+            
             # Depack item
             neighbor, message, peer, direction = item
-
+            self.backlog -= message.num_bits
+            
             # Get the connection to send this message through
             conn = self.outcons[neighbor]
 
@@ -49,6 +58,9 @@ class DtnBasicRadio(DtnAbstractRadio):
             # Apply delay for radio to transmit entire segment
             yield self.env.timeout(Ttx)
 
+            self.parent.departures_count += 1
+            self.parent.departures_bytes_count += message.num_bits
+            
             # Count the energy consumed
             self.energy += message.num_bits * self.J_bit
 
