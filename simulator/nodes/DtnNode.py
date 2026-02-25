@@ -18,6 +18,8 @@ class DtnNode(Simulable):
         #Initialize the counter
         self.arrivals_count = 0
         self.arrivals_bytes_count = 0
+        self.departures_count = 0
+        self.departures_bytes_count = 0
         
         # Initialize node properties
         self.nid   = nid

@@ -68,7 +68,8 @@ class DtnLockeablePriorityQueue(Simulable):
         self.disp('{} is retrieved from the manager', rt_record.bundle)
 
         # Subtract this bundle data volume from the backlog
-        self.backlog -= rt_record.bundle.data_vol
+        if not rt_record.bundle.dropped:
+            self.backlog -= rt_record.bundle.data_vol
 
         return rt_record
 
@@ -100,8 +101,15 @@ class DtnOverbookeableQueue(DtnLockeablePriorityQueue):
 
         # Time of next closing
         self.next_close = None
-        self.max_buffer = 50e6
-
+        
+        node_id = parent.parent.nid
+        if node_id == "RELAY":
+            self.max_buffer = 50e6
+        else:
+            self.max_buffer = float('inf')
+        
+        self.overflow_count = 0
+        self.overflow_bytes = 0
     @property
     def capacity(self):
         # If the gate is already closed, just return counter
@@ -121,8 +129,9 @@ class DtnOverbookeableQueue(DtnLockeablePriorityQueue):
         bundle = rt_record.bundle        
         
         if self.backlog + bundle.data_vol > self.max_buffer:
+            self.overflow_count += 1
             return (rt_record,)
-                
+             
         # If there is enough capacity left in this contact, just add the bundle to the queue
         if self.capacity > bundle.data_vol:
             yield from self.put_in_queue(rt_record, priority, where=where)

@@ -164,6 +164,7 @@ class DtnCgrNeighborManager(Simulable):
         self.parent.limbo(bundle, cids)
 
     def connection_monitor(self):
+    
         # If no contact plan available, exit
         if self.cp is None: yield self.env.exit()
 
@@ -230,13 +231,26 @@ class DtnCgrNeighborManager(Simulable):
             if bundle.dropped:
             
                 if self.queue.capacity is not None:
-                    self.queue.capacity += bundle.data_vol
-                       
+                    self.queue.capacity += bundle.data_vol     
+                
+             #   if self.queue.backlog is not None:
+             #       self.queue.backlog += bundle.data_vol 
                 continue
-                 
+            
+            # Get radio used for this neighbor
+            duct = self.parent.selector.select_duct(self.neighbor, bundle)
+            radio = duct['outduct'].radio
+            while radio.backlog + bundle.data_vol > radio.max_buffer:
+                yield self.env.timeout(0.001)
+   
             self.send(rt_record)
 
             # Do throttling mechanism, i.e you cannot send for a while. This "matches" the exit of bundles
             # from the priority queue and the throughput available in the convergence layer.
-            yield self.env.timeout(rt_record.bundle.data_vol/self.current_dr)
+            rate = self.current_dr
+
+            if self.parent.nid == "RELAY" and self.neighbor == "EARTH":
+                rate = 4e6   # your desired rate (example)
+                
+            yield self.env.timeout(rt_record.bundle.data_vol/rate)
     
