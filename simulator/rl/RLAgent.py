@@ -5,7 +5,7 @@ class RLAgent:
     def __init__(self):
 
         # Rate actions
-        self.rates = [1e6, 2e6, 5e6]
+        self.rates = [2e6, 2e6, 2e6]
 
         # Drop actions (number of bundles)
         self.drop_levels = [0,1,2,3,5]
