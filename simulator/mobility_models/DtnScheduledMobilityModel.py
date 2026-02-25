@@ -17,7 +17,7 @@ class DtnScheduledMobilityModel(DtnAbstractMobilityModel):
         # Load data from ezmonte
         print('Loading contact plan and range intervals')
         cp, ri = load_ezmonte_data(self.contact_file, self.ranges_file, self.epoch)
-
+        
         # Compute the data rate for every link
         dr = [(*cid, conn.total_datarate) for cid, conn in self.env.connections.items()]
         dr = pd.DataFrame.from_records(dr, columns=('orig', 'dest', 'rate')).set_index(['orig', 'dest'])

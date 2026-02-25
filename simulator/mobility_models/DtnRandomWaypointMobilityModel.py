@@ -116,3 +116,5 @@ class DtnRandomWaypointMobilityModel(DtnAbstractMobilityModel):
         dist = {(o, d): dist[i, :] for i, (o, d) in enumerate(combs)}
 
         return dist
+
+
